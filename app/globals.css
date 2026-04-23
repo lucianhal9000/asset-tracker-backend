@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #111118;
+  --surface-elevated: #1a1a24;
+  --border: #2a2a38;
+  --text-primary: #e8e8f0;
+  --text-muted: #6b6b80;
+  --accent: #4f8ef7;
+  --success: #22c97a;
+  --warning: #f5a623;
+  --danger: #f74f4f;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: Geist, sans-serif;
+}
+
+/* Custom scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) var(--bg);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border-radius: 3px;
+}
