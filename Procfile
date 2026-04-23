@@ -1,1 +1,1 @@
-web: python manage.py migrate && python manage.py createsu && daphne -b 0.0.0.0 -p $PORT core.asgi:application
+web: python manage.py migrate --run-syncdb && python manage.py createsu && daphne -b 0.0.0.0 -p $PORT core.asgi:application
