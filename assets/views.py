@@ -22,6 +22,17 @@ class IsAdminOrReadOnly(BasePermission):
         return request.user.is_staff
 
 
+def write_audit(asset: Asset | None, action: str, user, details: dict, *, asset_name: str = ''):
+    """Single place that writes the audit trail, so every path records the same fields."""
+    return AuditLog.objects.create(
+        asset=asset,
+        asset_name=asset_name or (asset.name if asset else ''),
+        action=action,
+        performed_by=user if getattr(user, 'is_authenticated', False) else None,
+        details=details,
+    )
+
+
 def broadcast_asset_update(event_type: str, asset: Asset):
     channel_layer = get_channel_layer()
     if channel_layer is None:
@@ -61,26 +72,26 @@ class AssetViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         asset = serializer.save()
-        AuditLog.objects.create(
-            asset=asset,
-            action='asset_created',
-            performed_by=self.request.user,
-            details={'data': self.request.data},
-        )
+        write_audit(asset, 'asset_created', self.request.user, {'data': self.request.data})
         broadcast_asset_update('asset_created', asset)
 
     def perform_update(self, serializer):
         asset = serializer.save()
-        AuditLog.objects.create(
-            asset=asset,
-            action='asset_updated',
-            performed_by=self.request.user,
-            details={'data': self.request.data},
-        )
+        write_audit(asset, 'asset_updated', self.request.user, {'data': self.request.data})
         broadcast_asset_update('asset_updated', asset)
 
     def perform_destroy(self, instance):
         asset_id = str(instance.id)
+        asset_name = instance.name
+        # Log BEFORE the delete. The FK is SET_NULL, so the row survives with
+        # asset_name preserved and asset set to None.
+        write_audit(
+            instance,
+            'asset_deleted',
+            self.request.user,
+            {'id': asset_id, 'name': asset_name},
+            asset_name=asset_name,
+        )
         instance.delete()
         channel_layer = get_channel_layer()
         if channel_layer:
@@ -88,6 +99,17 @@ class AssetViewSet(viewsets.ModelViewSet):
                 'assets',
                 {'type': 'asset_update', 'data': {'type': 'asset_deleted', 'asset': {'id': asset_id}}}
             )
+
+
+def create_location(validated_data: dict) -> Location:
+    """Turn a validated telemetry payload into a Location row."""
+    raw_payload = validated_data.get('raw_payload')
+    return Location.objects.create(
+        asset=Asset.objects.get(id=validated_data['asset_id']),
+        latitude=validated_data['latitude'],
+        longitude=validated_data['longitude'],
+        raw_payload=raw_payload.encode('utf-8') if isinstance(raw_payload, str) else None,
+    )
 
 
 class LocationViewSet(mixins.CreateModelMixin, viewsets.ReadOnlyModelViewSet):
@@ -103,24 +125,16 @@ class LocationViewSet(mixins.CreateModelMixin, viewsets.ReadOnlyModelViewSet):
         return qs
 
     def create(self, request, *args, **kwargs):
-        asset_id = request.data.get('asset_id') or request.data.get('asset')
-        if not asset_id:
-            return Response({'asset_id': ['This field is required.']}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            asset = Asset.objects.get(id=asset_id)
-        except Asset.DoesNotExist:
-            return Response({'asset_id': ['Asset with this id does not exist.']}, status=status.HTTP_400_BAD_REQUEST)
+        # Accept legacy 'asset' as an alias for 'asset_id' so existing clients
+        # keep working, then validate through the serializer rather than by hand.
+        payload = request.data.copy()
+        if not payload.get('asset_id') and payload.get('asset'):
+            payload['asset_id'] = payload['asset']
 
-        raw_payload = request.data.get('raw_payload')
-        raw_payload_bytes = raw_payload.encode('utf-8') if isinstance(raw_payload, str) else None
-
-        location = Location.objects.create(
-            asset=asset,
-            latitude=request.data.get('latitude'),
-            longitude=request.data.get('longitude'),
-            raw_payload=raw_payload_bytes,
-        )
-        return Response(self.get_serializer(location).data, status=status.HTTP_201_CREATED)
+        serializer = TelemetrySerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        location = create_location(serializer.validated_data)
+        return Response(LocationSerializer(location).data, status=status.HTTP_201_CREATED)
 
 
 class TelemetryView(APIView):
@@ -130,22 +144,14 @@ class TelemetryView(APIView):
         serializer = TelemetrySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        asset = Asset.objects.get(id=serializer.validated_data['asset_id'])
-        raw_payload = serializer.validated_data.get('raw_payload')
-        raw_payload_bytes = raw_payload.encode('utf-8') if isinstance(raw_payload, str) else None
+        location = create_location(serializer.validated_data)
+        asset = location.asset
 
-        location = Location.objects.create(
-            asset=asset,
-            latitude=serializer.validated_data['latitude'],
-            longitude=serializer.validated_data['longitude'],
-            raw_payload=raw_payload_bytes,
-        )
-
-        AuditLog.objects.create(
-            asset=asset,
-            action='telemetry_ping',
-            performed_by=request.user,
-            details={
+        write_audit(
+            asset,
+            'telemetry_ping',
+            request.user,
+            {
                 'latitude': str(serializer.validated_data['latitude']),
                 'longitude': str(serializer.validated_data['longitude']),
             },
