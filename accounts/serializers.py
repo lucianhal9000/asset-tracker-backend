@@ -9,6 +9,14 @@ class RegisterSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
     last_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
 
+    def validate_email(self, value):
+        email = value.lower().strip()
+        User = get_user_model()
+        if User.objects.filter(email__iexact=email).exists() or \
+                User.objects.filter(username__iexact=email).exists():
+            raise serializers.ValidationError('A user with this email already exists.')
+        return email
+
     def validate(self, attrs):
         if attrs.get('password') != attrs.get('password2'):
             raise serializers.ValidationError({'password2': 'Passwords do not match.'})
