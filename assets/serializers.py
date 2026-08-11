@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import Asset, AuditLog, Location
@@ -43,9 +45,21 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 
 class TelemetrySerializer(serializers.Serializer):
+    """Canonical ingest payload. Used by both TelemetryView and LocationViewSet."""
+
     asset_id = serializers.UUIDField()
-    latitude = serializers.DecimalField(max_digits=9, decimal_places=6)
-    longitude = serializers.DecimalField(max_digits=9, decimal_places=6)
+    latitude = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        min_value=Decimal('-90'),
+        max_value=Decimal('90'),
+    )
+    longitude = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        min_value=Decimal('-180'),
+        max_value=Decimal('180'),
+    )
     raw_payload = serializers.CharField(required=False, allow_blank=True)
 
     def validate_asset_id(self, value):

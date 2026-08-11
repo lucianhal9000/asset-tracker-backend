@@ -49,7 +49,15 @@ class Location(models.Model):
 
 class AuditLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    asset = models.ForeignKey(Asset, on_delete=models.CASCADE)
+    # SET_NULL, not CASCADE: deleting an asset must not erase its history.
+    asset = models.ForeignKey(
+        Asset,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    # Denormalised so the trail stays readable after the asset is gone.
+    asset_name = models.CharField(max_length=200, blank=True)
     action = models.CharField(max_length=100)
     performed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -61,4 +69,4 @@ class AuditLog(models.Model):
     details = models.JSONField(default=dict)
 
     def __str__(self) -> str:
-        return f'{self.action} - {self.asset.name}'
+        return f'{self.action} - {self.asset_name or "(deleted asset)"}'
